@@ -3,3 +3,6 @@ PhotoViewer.config.json
 
 # Bloc-notes de logs temporaires colles depuis le terminal
 LogsTmp.txt
+
+# Classeurs generes par Export-ContactSheet.ps1 (sorties, pas du code source)
+PlancheContact_*.xlsx

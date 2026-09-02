@@ -20,6 +20,22 @@ Add-Type -AssemblyName PresentationCore, WindowsBase, System.Windows.Forms -Erro
 
 $script:MaxImageWidthPoints = 220   # ~7.8 cm, lisible sans etre trop lourd
 $script:ImageExtensions = @('.jpg', '.jpeg', '.png', '.bmp', '.gif')
+$script:XlCenter = -4108   # xlCenter (horizontal et vertical) - constante Excel non exposee en late-binding COM
+
+# Ajuste la largeur d'une colonne pour approcher une valeur cible en POINTS. ColumnWidth
+# s'exprime en "caracteres" (unite dependante de la police), pas en points, contrairement a
+# la largeur des images (Shape.Width, en points) : sans cette conversion, la colonne ne
+# correspond pas a la largeur reelle des photos inserees. On affine par iteration car la
+# relation caracteres/points n'est pas parfaitement lineaire.
+function Set-ColumnWidthInPoints {
+    param($Column, [double]$TargetPoints)
+    $Column.ColumnWidth = $TargetPoints / 7
+    for ($i = 0; $i -lt 4; $i++) {
+        $diff = $TargetPoints - $Column.Width
+        if ([Math]::Abs($diff) -lt 0.5) { break }
+        $Column.ColumnWidth = $Column.ColumnWidth + ($diff / 7)
+    }
+}
 
 # Date de prise de vue EXIF via les metadonnees WPF (BitmapMetadata.DateTaken) - pas besoin
 # de decoder l'image entiere. Retourne $null si absente (l'appelant se rabat alors sur la
@@ -78,7 +94,9 @@ function Export-ContactSheet {
         $sheet.Cells.Item(1, 2) = 'Photo'
         $sheet.Cells.Item(1, 3) = 'Horodatage'
         $sheet.Range('A1:C1').Font.Bold = $true
-        $sheet.Columns.Item(2).ColumnWidth = 32
+        $sheet.Range('A1:C1').HorizontalAlignment = $script:XlCenter
+        $sheet.Range('A1:C1').VerticalAlignment = $script:XlCenter
+        Set-ColumnWidthInPoints -Column $sheet.Columns.Item(2) -TargetPoints ($script:MaxImageWidthPoints + 8)
 
         $row = 2
         foreach ($file in $files) {
@@ -91,7 +109,7 @@ function Export-ContactSheet {
                 $pic.Height = $pic.Height * ($script:MaxImageWidthPoints / $pic.Width)
                 $pic.Width = $script:MaxImageWidthPoints
             }
-            $sheet.Rows.Item($row).RowHeight = $pic.Height + 4
+            $sheet.Rows.Item($row).RowHeight = $pic.Height + 6
 
             $takenDate = Get-PhotoTakenDate -Path $file.FullName
             if (-not $takenDate) { $takenDate = $file.LastWriteTime }
@@ -99,6 +117,10 @@ function Export-ContactSheet {
 
             $row++
         }
+
+        $dataRange = $sheet.Range("A2:C$($row - 1)")
+        $dataRange.HorizontalAlignment = $script:XlCenter
+        $dataRange.VerticalAlignment = $script:XlCenter
 
         $sheet.Columns.Item(1).AutoFit() | Out-Null
         $sheet.Columns.Item(3).AutoFit() | Out-Null
