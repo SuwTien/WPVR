@@ -158,10 +158,11 @@ Chantier indépendant du viewer WPF (pas de dépendance avec les étapes précé
 
 Objectif :
 - Bouton dans le bandeau Excel qui scanne le répertoire "photos fraîches".
-- Crée un nouvel onglet dans le classeur avec, pour chaque photo trouvée, une ligne :
+- Crée un **nouveau classeur Excel vierge et autonome** (Workbooks.Add), sans modifier le classeur macro existant, puis l'enregistre (SaveAs) sous un nom à définir (ex. horodaté).
+- Dans ce nouveau classeur, pour chaque photo trouvée, une ligne :
   - Colonne A : nom du fichier
-  - Colonne B : l'image elle-même, insérée et ancrée dans la cellule, redimensionnée pour tenir dans la hauteur de ligne
+  - Colonne B : l'image elle-même, insérée via Shapes.AddPicture, redimensionnée pour rester lisible sans être trop lourde en mémoire
   - Colonne C : horodatage (date de prise de vue EXIF si disponible, sinon date de modification du fichier)
-- Doit gérer proprement le cas où l'onglet existe déjà (ex. proposer de le recréer, ou d'ajouter les nouvelles photos à la suite, à toi de proposer un comportement raisonnable).
-- Le but final est d'imprimer ensuite cet onglet en PDF avec une mise en page propre — pas besoin de gérer la mise en page/impression dans ce chantier, juste la génération des données et images dans la feuille.
+- Doit gérer proprement le cas où le fichier de sortie existe déjà (ex. proposer un nom horodaté unique, ou demander confirmation avant d'écraser).
+- Le but final est que l'utilisateur puisse ensuite copier manuellement cette feuille dans un autre classeur si besoin (pas à automatiser ici) — pas besoin de gérer la mise en page/impression dans ce chantier, juste la génération du fichier et des données/images dedans.
 ```

@@ -83,13 +83,13 @@ WPF a été choisi plutôt qu'une interface web locale (PowerShell + serveur HTT
 ### Export "planche contact" Excel
 - Nouveau bouton dans le bandeau Excel (à côté de celui qui lance le viewer).
 - Scanne le répertoire "photos fraîches".
-- Crée un nouvel onglet Excel avec, par photo, une ligne :
+- Génère un **nouveau classeur Excel vierge et autonome** (`Workbooks.Add` puis `SaveAs`), sans toucher au classeur macro existant — avec, par photo, une ligne :
   - Colonne A : nom du fichier
-  - Colonne B : image insérée/ancrée dans la cellule (redimensionnée)
-  - Colonne C : horodatage (date de prise de vue EXIF si dispo, sinon date de fichier)
-- Usage réel : constitution de rapports illustrés (photos + remarques/commentaires), mis en page ensuite pour impression PDF (hors périmètre de ce projet).
+  - Colonne B : image insérée (`Shapes.AddPicture`, positionnement libre possible), redimensionnée
+  - Colonne C : horodatage (date de prise de vue EXIF si dispo, sinon date de fichier) — syntaxe exacte à définir plus tard si besoin d'alignement avec un format existant
+- Usage réel : constitution de rapports illustrés (photos + remarques/commentaires), mis en page ensuite pour impression PDF (hors périmètre de ce projet). Objectif : prouver le concept en autonomie ; une éventuelle intégration dans un classeur/rapport "officiel" partagé avec des collègues nécessite leur validation au préalable (contraintes de compatibilité : mot de passe de feuille, taille/résolution des photos pour la mémoire) — non traité dans ce projet, à voir séparément le moment venu.
 - Remplace le processus actuel manuel "photo par photo".
-- Techniquement indépendant du viewer WPF (pas de dépendance croisée) — peut être développé et testé séparément. Réutilise la logique VBA déjà existante dans le classeur de l'utilisateur.
+- Techniquement indépendant du viewer WPF (pas de dépendance croisée) — peut être développé et testé séparément. Réutilise la logique VBA déjà existante dans le classeur de l'utilisateur (déclenchement du bouton), sans modifier ce classeur.
 
 ## Hors scope v1 / Backlog
 - Affichage côte à côte des deux répertoires (abandonné au profit du switch, faute d'espace écran).
