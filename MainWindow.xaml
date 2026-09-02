@@ -2,6 +2,23 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Photo Viewer" Width="480" Height="800" MinWidth="320" MinHeight="400"
         Background="#FF1E1E1E">
+    <Window.Resources>
+        <!-- Bouton sans chrome par defaut : evite le halo gris au survol souris des boutons
+             transparents du plein ecran (fleches, fermeture). -->
+        <Style x:Key="TransparentIconButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -102,5 +119,48 @@
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
         </ScrollViewer>
+
+        <!-- Mode plein ecran (etape 5) : recouvre toute la fenetre, cache par defaut -->
+        <Grid x:Name="FullScreenOverlay" Grid.Row="0" Grid.RowSpan="2"
+              Background="#FF000000" Visibility="Collapsed" Focusable="True">
+            <Border x:Name="FullScreenImageContainer" ClipToBounds="True">
+                <Image x:Name="FullScreenImage" Stretch="Uniform" RenderTransformOrigin="0.5,0.5">
+                    <Image.RenderTransform>
+                        <TransformGroup>
+                            <ScaleTransform x:Name="FullScreenScale"/>
+                            <TranslateTransform x:Name="FullScreenTranslate"/>
+                        </TransformGroup>
+                    </Image.RenderTransform>
+                </Image>
+            </Border>
+
+            <!-- Fleches larges et hautes (3/4 de la hauteur) pour un ciblage tactile facile -->
+            <Grid HorizontalAlignment="Left" Width="90" Margin="8,0,0,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="1*"/>
+                    <RowDefinition Height="6*"/>
+                    <RowDefinition Height="1*"/>
+                </Grid.RowDefinitions>
+                <Button x:Name="FullScreenPrevButton" Grid.Row="1" Content="&#8249;" FontSize="40"
+                        Style="{StaticResource TransparentIconButtonStyle}" Foreground="White"/>
+            </Grid>
+            <Grid HorizontalAlignment="Right" Width="90" Margin="0,0,8,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="1*"/>
+                    <RowDefinition Height="6*"/>
+                    <RowDefinition Height="1*"/>
+                </Grid.RowDefinitions>
+                <Button x:Name="FullScreenNextButton" Grid.Row="1" Content="&#8250;" FontSize="40"
+                        Style="{StaticResource TransparentIconButtonStyle}" Foreground="White"/>
+            </Grid>
+
+            <Button x:Name="FullScreenCloseButton" Content="&#10005;" FontSize="18" Width="44" Height="44"
+                    HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,8,8,0"
+                    Style="{StaticResource TransparentIconButtonStyle}" Foreground="White"/>
+
+            <Button x:Name="FullScreenFileNameButton" VerticalAlignment="Bottom" HorizontalAlignment="Stretch"
+                    Height="48" Background="#AA000000" BorderThickness="0" Foreground="White" FontSize="14"
+                    HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
+        </Grid>
     </Grid>
 </Window>

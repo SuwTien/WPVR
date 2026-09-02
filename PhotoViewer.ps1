@@ -167,6 +167,7 @@ namespace PhotoViewer.Gestures
             DispatcherTimer timer = null;
             PhotoItem pressedItem = null;
             Point downPos = default(Point);
+            bool longPressFired = false;
 
             Action<DependencyObject, Point> startPress = (source, pos) =>
             {
@@ -175,6 +176,7 @@ namespace PhotoViewer.Gestures
 
                 pressedItem = element.DataContext as PhotoItem;
                 downPos = pos;
+                longPressFired = false;
 
                 timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(thresholdMs) };
                 timer.Tick += (s, e) =>
@@ -182,6 +184,7 @@ namespace PhotoViewer.Gestures
                     timer.Stop();
                     var item = pressedItem;
                     pressedItem = null;
+                    longPressFired = true;
                     if (item != null) onLongPress(item);
                 };
                 timer.Start();
@@ -202,9 +205,19 @@ namespace PhotoViewer.Gestures
                     if ((p - downPos).Length > 15) cancelPress();
                 }
             };
-            root.PreviewMouseLeftButtonUp += (s, e) => cancelPress();
+            root.PreviewMouseLeftButtonUp += (s, e) =>
+            {
+                // L'appui long a deja declenche son action : on avale ce relachement pour eviter
+                // que le Click normal du bouton (tap -> renommage) se declenche juste apres.
+                if (longPressFired) { e.Handled = true; longPressFired = false; }
+                cancelPress();
+            };
             root.PreviewTouchDown += (s, e) => startPress(e.OriginalSource as DependencyObject, e.GetTouchPoint(root).Position);
-            root.PreviewTouchUp += (s, e) => cancelPress();
+            root.PreviewTouchUp += (s, e) =>
+            {
+                if (longPressFired) { e.Handled = true; longPressFired = false; }
+                cancelPress();
+            };
         }
 
         private static FrameworkElement FindPhotoItemElement(DependencyObject d)
@@ -216,6 +229,98 @@ namespace PhotoViewer.Gestures
                 d = VisualTreeHelper.GetParent(d);
             }
             return null;
+        }
+    }
+
+    // Zoom (pincement tactile ou molette) + pan + swipe gauche/droite (mode plein ecran, etape 5).
+    // Le swipe n'est detecte que si l'image n'est pas zoomee (comportement standard des visionneuses photo).
+    public static class ZoomPanGesture
+    {
+        private const double MinScale = 1.0;
+        private const double MaxScale = 5.0;
+        private const double SwipeThreshold = 60.0;
+
+        public static void Attach(FrameworkElement target, ScaleTransform scale, TranslateTransform translate, Action onSwipeLeft, Action onSwipeRight)
+        {
+            target.IsManipulationEnabled = true;
+            double accumulatedX = 0;
+
+            target.ManipulationDelta += (s, e) =>
+            {
+                double newScale = Math.Max(MinScale, Math.Min(MaxScale, scale.ScaleX * e.DeltaManipulation.Scale.X));
+                scale.ScaleX = newScale;
+                scale.ScaleY = newScale;
+
+                if (newScale > MinScale + 0.01)
+                {
+                    translate.X += e.DeltaManipulation.Translation.X;
+                    translate.Y += e.DeltaManipulation.Translation.Y;
+                }
+                else
+                {
+                    accumulatedX += e.DeltaManipulation.Translation.X;
+                }
+                e.Handled = true;
+            };
+
+            target.ManipulationCompleted += (s, e) =>
+            {
+                if (scale.ScaleX <= MinScale + 0.01)
+                {
+                    if (accumulatedX <= -SwipeThreshold && onSwipeLeft != null) onSwipeLeft();
+                    else if (accumulatedX >= SwipeThreshold && onSwipeRight != null) onSwipeRight();
+                    translate.X = 0;
+                    translate.Y = 0;
+                }
+                accumulatedX = 0;
+            };
+
+            target.PreviewMouseWheel += (s, e) =>
+            {
+                double factor = e.Delta > 0 ? 1.1 : (1 / 1.1);
+                double newScale = Math.Max(MinScale, Math.Min(MaxScale, scale.ScaleX * factor));
+                scale.ScaleX = newScale;
+                scale.ScaleY = newScale;
+                if (newScale <= MinScale + 0.01) { translate.X = 0; translate.Y = 0; }
+                e.Handled = true;
+            };
+
+            // Deplacement (pan) a la souris une fois zoome : la Manipulation ne couvre que le tactile.
+            bool dragging = false;
+            Point dragStart = default(Point);
+            double startTranslateX = 0, startTranslateY = 0;
+
+            target.PreviewMouseLeftButtonDown += (s, e) =>
+            {
+                if (scale.ScaleX <= MinScale + 0.01) return;
+                dragging = true;
+                dragStart = e.GetPosition(target);
+                startTranslateX = translate.X;
+                startTranslateY = translate.Y;
+                target.CaptureMouse();
+                e.Handled = true;
+            };
+            target.PreviewMouseMove += (s, e) =>
+            {
+                if (!dragging) return;
+                var pos = e.GetPosition(target);
+                translate.X = startTranslateX + (pos.X - dragStart.X);
+                translate.Y = startTranslateY + (pos.Y - dragStart.Y);
+            };
+            target.PreviewMouseLeftButtonUp += (s, e) =>
+            {
+                if (!dragging) return;
+                dragging = false;
+                target.ReleaseMouseCapture();
+            };
+        }
+
+        public static void Reset(ScaleTransform scale, TranslateTransform translate)
+        {
+            scale.ScaleX = 1;
+            scale.ScaleY = 1;
+            translate.X = 0;
+            translate.Y = 0;
         }
     }
 }
@@ -241,6 +346,23 @@ namespace PhotoViewer.Interop
         [DllImport("user32.dll")]
         private static extern bool IsWindowVisible(IntPtr hWnd);
 
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
+
+        private const int DWMWA_CLOAKED = 14;
+
+        // IsWindowVisible ne suffit pas : le clavier tactile moderne (UWP) reste "visible" au sens Win32
+        // meme masque, Windows le cache via le "cloaking" DWM plutot qu'un simple ShowWindow. Sans cette
+        // verification, on le croit ferme alors qu'il est ouvert, et Toggle() le referme par erreur.
+        private static bool IsActuallyVisible(IntPtr hWnd)
+        {
+            if (!IsWindowVisible(hWnd)) return false;
+            int cloaked;
+            int hr = DwmGetWindowAttribute(hWnd, DWMWA_CLOAKED, out cloaked, sizeof(int));
+            if (hr == 0 && cloaked != 0) return false;
+            return true;
+        }
+
         // ITipInvocation.Toggle() bascule montre/cache : on ne l'appelle donc que si le clavier
         // n'est PAS deja visible, sinon un appel alors qu'il est ouvert le referme (comportement surprenant).
         public static void Show(IntPtr ownerHandle)
@@ -248,7 +370,7 @@ namespace PhotoViewer.Interop
             try
             {
                 IntPtr tipWindow = FindWindow("IPTip_Main_Window", null);
-                if (tipWindow != IntPtr.Zero && IsWindowVisible(tipWindow)) return;
+                if (tipWindow != IntPtr.Zero && IsActuallyVisible(tipWindow)) return;
                 var invocation = (ITipInvocation)new UIHostNoLaunch();
                 invocation.Toggle(ownerHandle);
             }
@@ -332,6 +454,37 @@ namespace PhotoViewer.Services
                 }
             });
         }
+
+        // Chargement d'une image plein ecran (pas de limite de concurrence : une seule a la fois en pratique).
+        public static void LoadFullImageAsync(string fullPath, int decodePixelWidth, Dispatcher dispatcher, GenerationGate gate, int generation, Action<BitmapImage> onLoaded)
+        {
+            Task.Run(() =>
+            {
+                if (gate.Current != generation) return;
+                try
+                {
+                    BitmapImage bmp;
+                    using (var stream = File.OpenRead(fullPath))
+                    {
+                        bmp = new BitmapImage();
+                        bmp.BeginInit();
+                        bmp.CacheOption = BitmapCacheOption.OnLoad;
+                        bmp.StreamSource = stream;
+                        if (decodePixelWidth > 0) bmp.DecodePixelWidth = decodePixelWidth;
+                        bmp.EndInit();
+                    }
+                    bmp.Freeze();
+                    dispatcher.Invoke((Action)(() =>
+                    {
+                        if (gate.Current == generation) onLoaded(bmp);
+                    }));
+                }
+                catch
+                {
+                    // Image plein ecran illisible : la vue reste vide, l'utilisateur peut naviguer ailleurs.
+                }
+            });
+        }
     }
 }
 "@
@@ -347,6 +500,16 @@ $reader.Close()
 $directoryLabel = $window.FindName('DirectoryLabel')
 $scrollViewer = $window.FindName('GridScrollViewer')
 $rowsItemsControl = $window.FindName('RowsItemsControl')
+
+$fullScreenOverlay = $window.FindName('FullScreenOverlay')
+$fullScreenImageContainer = $window.FindName('FullScreenImageContainer')
+$fullScreenImage = $window.FindName('FullScreenImage')
+$fullScreenScale = $window.FindName('FullScreenScale')
+$fullScreenTranslate = $window.FindName('FullScreenTranslate')
+$fullScreenPrevButton = $window.FindName('FullScreenPrevButton')
+$fullScreenNextButton = $window.FindName('FullScreenNextButton')
+$fullScreenCloseButton = $window.FindName('FullScreenCloseButton')
+$fullScreenFileNameButton = $window.FindName('FullScreenFileNameButton')
 
 $uiDispatcher = $window.Dispatcher
 
@@ -459,12 +622,50 @@ function Show-RenamePopup {
     $popup.ShowDialog() | Out-Null
 }
 
-function Show-LongPressPlaceholder {
+# ------------------------------------------------------------------
+# Mode plein ecran (etape 5) : navigation swipe/clavier, zoom/pan tactile, nom cliquable
+# reutilisant la popup de renommage. $allPhotos represente toujours le repertoire affiche.
+# ------------------------------------------------------------------
+$script:fullScreenIndex = -1
+$script:fullScreenGate = New-Object PhotoViewer.Services.GenerationGate
+
+function Update-FullScreenImage {
+    if ($script:fullScreenIndex -lt 0 -or $script:fullScreenIndex -ge $allPhotos.Count) { return }
+    $photo = $allPhotos[$script:fullScreenIndex]
+    $fullScreenFileNameButton.Content = $photo.FileName
+    [PhotoViewer.Gestures.ZoomPanGesture]::Reset($fullScreenScale, $fullScreenTranslate)
+    $fullScreenImage.Source = $null
+    $generation = $script:fullScreenGate.Next()
+    $onLoaded = { param($bmp) $fullScreenImage.Source = $bmp }
+    [PhotoViewer.Services.ThumbnailLoader]::LoadFullImageAsync($photo.FullPath, 1920, $uiDispatcher, $script:fullScreenGate, $generation, [Action[System.Windows.Media.Imaging.BitmapImage]]$onLoaded)
+}
+
+function Show-FullScreenPhoto {
     param([PhotoViewer.Models.PhotoItem]$Photo)
-    # Validation du mecanisme d'appui long uniquement (le vrai plein ecran arrive a l'etape 5).
-    [System.Windows.MessageBox]::Show(
-        "Appui long detecte (test) : $($Photo.FileName)`n(le mode plein ecran sera branche a l'etape 5)",
-        "Photo Viewer", 'OK', 'Information') | Out-Null
+    $index = $allPhotos.IndexOf($Photo)
+    if ($index -lt 0) { return }
+    $script:fullScreenIndex = $index
+    $fullScreenOverlay.Visibility = 'Visible'
+    Update-FullScreenImage
+    $fullScreenOverlay.Focus() | Out-Null
+}
+
+function Hide-FullScreenPhoto {
+    $fullScreenOverlay.Visibility = 'Collapsed'
+    $fullScreenImage.Source = $null
+    $script:fullScreenIndex = -1
+}
+
+function Show-NextFullScreenPhoto {
+    if ($allPhotos.Count -eq 0) { return }
+    $script:fullScreenIndex = ($script:fullScreenIndex + 1) % $allPhotos.Count
+    Update-FullScreenImage
+}
+
+function Show-PreviousFullScreenPhoto {
+    if ($allPhotos.Count -eq 0) { return }
+    $script:fullScreenIndex = ($script:fullScreenIndex - 1 + $allPhotos.Count) % $allPhotos.Count
+    Update-FullScreenImage
 }
 
 # ------------------------------------------------------------------
@@ -579,6 +780,8 @@ function Load-CurrentDirectory {
     $config = $script:directoryConfigs[$script:currentDirectoryIndex]
     $generation = $script:generationGate.Next()
 
+    if ($fullScreenOverlay.Visibility -eq 'Visible') { Hide-FullScreenPhoto }
+
     $viewModel.DirectoryLabel = $config.Path
     $viewModel.IsReadOnly = $config.IsReadOnly
 
@@ -606,10 +809,40 @@ function Load-CurrentDirectory {
 Load-CurrentDirectory
 
 # ------------------------------------------------------------------
-# Validation Add-Type : detection d'appui long sur la grille (voir Gestures.LongPressGesture)
+# Mode plein ecran : appui long depuis la grille, boutons prev/suivant/fermer,
+# nom cliquable (rename), Echap/fleches clavier, zoom/pan/swipe tactile.
 # ------------------------------------------------------------------
-$longPressAction = { param($photo) Show-LongPressPlaceholder -Photo $photo }
+$longPressAction = { param($photo) Show-FullScreenPhoto -Photo $photo }
 [PhotoViewer.Gestures.LongPressGesture]::Attach($scrollViewer, [Action[PhotoViewer.Models.PhotoItem]]$longPressAction, $LongPressThresholdMs)
+
+$fullScreenPrevButton.Add_Click({ param($s, $e) Show-PreviousFullScreenPhoto })
+$fullScreenNextButton.Add_Click({ param($s, $e) Show-NextFullScreenPhoto })
+$fullScreenCloseButton.Add_Click({ param($s, $e) Hide-FullScreenPhoto })
+
+$fullScreenFileNameButton.Add_Click({
+    param($s, $e)
+    if ($viewModel.IsReadOnly) { return }
+    if ($script:fullScreenIndex -lt 0 -or $script:fullScreenIndex -ge $allPhotos.Count) { return }
+    $photo = $allPhotos[$script:fullScreenIndex]
+    Show-RenamePopup -Photo $photo
+    if ($allPhotos.Count -eq 0) { Hide-FullScreenPhoto; return }
+    if ($script:fullScreenIndex -ge $allPhotos.Count) { $script:fullScreenIndex = $allPhotos.Count - 1 }
+    Update-FullScreenImage
+})
+
+$fullScreenOverlay.Add_PreviewKeyDown({
+    param($s, $e)
+    switch ($e.Key) {
+        'Escape' { Hide-FullScreenPhoto; $e.Handled = $true }
+        'Left'   { Show-PreviousFullScreenPhoto; $e.Handled = $true }
+        'Right'  { Show-NextFullScreenPhoto; $e.Handled = $true }
+    }
+})
+
+# Swipe gauche -> photo suivante, swipe droite -> photo precedente (uniquement hors zoom).
+[PhotoViewer.Gestures.ZoomPanGesture]::Attach(
+    $fullScreenImageContainer, $fullScreenScale, $fullScreenTranslate,
+    [Action]{ Show-NextFullScreenPhoto }, [Action]{ Show-PreviousFullScreenPhoto })
 
 # ------------------------------------------------------------------
 # Lancement de l'application
