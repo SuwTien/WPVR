@@ -31,6 +31,7 @@
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
             <TextBlock x:Name="DirectoryLabel" Grid.Column="0" VerticalAlignment="Center"
@@ -66,7 +67,10 @@
             <Button x:Name="ChooseDirectoryButton" Grid.Column="2" Padding="10,6" Margin="0,0,8,0"
                     Content="Dossier..." Command="{Binding ChooseDirectoryCommand}"/>
 
-            <Button x:Name="ToggleDirectoryButton" Grid.Column="3" Padding="10,6"
+            <Button x:Name="RefreshButton" Grid.Column="3" Padding="10,6" Margin="0,0,8,0"
+                    Content="Rafraichir"/>
+
+            <Button x:Name="ToggleDirectoryButton" Grid.Column="4" Padding="10,6"
                     Content="Basculer" Command="{Binding ToggleDirectoryCommand}"/>
         </Grid>
 

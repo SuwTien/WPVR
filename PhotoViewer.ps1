@@ -486,6 +486,42 @@ namespace PhotoViewer.Services
             });
         }
     }
+
+    // Surveillance d'un repertoire (detection auto des nouvelles photos, etape 6). Ecrit entierement en C#
+    // pour la meme raison que ThumbnailLoader : Register-ObjectEvent ne se declenche JAMAIS tant que le
+    // thread principal est bloque dans Application.Run() (celui-ci pompe les messages WPF, pas la queue
+    // d'evenements PowerShell). FileSystemWatcher leve ses evenements sur un thread du pool ; on rejoint
+    // le thread UI via Dispatcher.Invoke (qui LUI est activement pompe par Application.Run) avant d'appeler
+    // le callback PowerShell fourni - c'est la meme technique que le chargement des miniatures.
+    public static class DirectoryWatcher
+    {
+        public static FileSystemWatcher Start(string path, Dispatcher dispatcher, Action onChanged, int debounceMs)
+        {
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(debounceMs) };
+            timer.Tick += (s, e) =>
+            {
+                timer.Stop();
+                onChanged();
+            };
+
+            FileSystemEventHandler onEvent = (s, e) =>
+            {
+                dispatcher.Invoke((Action)(() =>
+                {
+                    timer.Stop();
+                    timer.Start();
+                }));
+            };
+
+            var watcher = new FileSystemWatcher(path);
+            watcher.IncludeSubdirectories = false;
+            watcher.NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite;
+            watcher.Created += onEvent;
+            watcher.Renamed += (s, e) => onEvent(s, e);
+            watcher.EnableRaisingEvents = true;
+            return watcher;
+        }
+    }
 }
 "@
 
@@ -500,6 +536,7 @@ $reader.Close()
 $directoryLabel = $window.FindName('DirectoryLabel')
 $scrollViewer = $window.FindName('GridScrollViewer')
 $rowsItemsControl = $window.FindName('RowsItemsControl')
+$refreshButton = $window.FindName('RefreshButton')
 
 $fullScreenOverlay = $window.FindName('FullScreenOverlay')
 $fullScreenImageContainer = $window.FindName('FullScreenImageContainer')
@@ -715,6 +752,7 @@ $chooseDirectoryAction = {
         $script:directoryConfigs[$script:currentDirectoryIndex].Path = $picked
         Save-DirectoryConfig
         Load-CurrentDirectory
+        if ($script:currentDirectoryIndex -eq 0) { Start-FreshDirectoryWatcher }
     }
 }
 $viewModel.ChooseDirectoryCommand = New-Object PhotoViewer.Commands.RelayCommand ([Action[object]]$chooseDirectoryAction)
@@ -806,7 +844,32 @@ function Load-CurrentDirectory {
     Start-ThumbnailLoading -Generation $generation
 }
 
+# ------------------------------------------------------------------
+# Detection automatique des nouvelles photos dans le repertoire "fraiches" (voir
+# PhotoViewer.Services.DirectoryWatcher - callback invoque sur le thread UI, donc du PowerShell y est sans risque).
+# ------------------------------------------------------------------
+$script:freshWatcher = $null
+
+function Start-FreshDirectoryWatcher {
+    if ($script:freshWatcher) {
+        $script:freshWatcher.EnableRaisingEvents = $false
+        $script:freshWatcher.Dispose()
+        $script:freshWatcher = $null
+    }
+
+    $freshPath = $script:directoryConfigs[0].Path
+    if (-not (Test-Path -LiteralPath $freshPath -PathType Container)) { return }
+
+    $onFreshChanged = {
+        if ($script:currentDirectoryIndex -eq 0) { Load-CurrentDirectory }
+    }
+    $script:freshWatcher = [PhotoViewer.Services.DirectoryWatcher]::Start($freshPath, $uiDispatcher, [Action]$onFreshChanged, 600)
+}
+
 Load-CurrentDirectory
+Start-FreshDirectoryWatcher
+
+$refreshButton.Add_Click({ param($s, $e) Load-CurrentDirectory })
 
 # ------------------------------------------------------------------
 # Mode plein ecran : appui long depuis la grille, boutons prev/suivant/fermer,
