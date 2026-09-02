@@ -397,20 +397,32 @@ function Show-RenamePopup {
         $nameTextBox.Focus()
         $nameTextBox.SelectAll()
         [PhotoViewer.Interop.TouchKeyboard]::Show($popupHandle)
-    }.GetNewClosure())
+    })
 
-    # Bouton corbeille : placeholder, la suppression reelle sera branchee a l'etape 4.
+    # Bouton corbeille : confirmation obligatoire puis suppression reelle du fichier.
     $trashButton.Add_Click({
         param($s, $e)
-        [System.Windows.MessageBox]::Show(
-            "Suppression (placeholder) : $($Photo.FileName)`n(la suppression reelle sera branchee a l'etape 4)",
-            "Photo Viewer", 'OK', 'Information') | Out-Null
-    }.GetNewClosure())
+        $confirm = [System.Windows.MessageBox]::Show(
+            "Supprimer '$($Photo.FileName)' ?`nCette action est definitive.",
+            "Photo Viewer", 'YesNo', 'Warning')
+        if ($confirm -ne [System.Windows.MessageBoxResult]::Yes) { return }
+
+        try {
+            Remove-Item -LiteralPath $Photo.FullPath -ErrorAction Stop
+        } catch {
+            [System.Windows.MessageBox]::Show("Erreur lors de la suppression : $_", "Photo Viewer", 'OK', 'Error') | Out-Null
+            return
+        }
+
+        $allPhotos.Remove($Photo) | Out-Null
+        Update-PhotoRows -Columns $script:currentColumnCount -Force
+        $popup.DialogResult = $false
+    })
 
     $cancelButton.Add_Click({
         param($s, $e)
         $popup.DialogResult = $false
-    }.GetNewClosure())
+    })
 
     $validateButton.Add_Click({
         param($s, $e)
@@ -442,7 +454,7 @@ function Show-RenamePopup {
         }
 
         $popup.DialogResult = $true
-    }.GetNewClosure())
+    })
 
     $popup.ShowDialog() | Out-Null
 }
