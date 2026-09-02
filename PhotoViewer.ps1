@@ -55,7 +55,10 @@ Add-Type -AssemblyName PresentationCore, PresentationFramework, WindowsBase, Sys
 Add-Type -ReferencedAssemblies PresentationCore, PresentationFramework, WindowsBase, System.Xaml -TypeDefinition @"
 using System;
 using System.ComponentModel;
+using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -232,10 +235,20 @@ namespace PhotoViewer.Interop
 
     public static class TouchKeyboard
     {
-        public static void Toggle(IntPtr ownerHandle)
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+
+        [DllImport("user32.dll")]
+        private static extern bool IsWindowVisible(IntPtr hWnd);
+
+        // ITipInvocation.Toggle() bascule montre/cache : on ne l'appelle donc que si le clavier
+        // n'est PAS deja visible, sinon un appel alors qu'il est ouvert le referme (comportement surprenant).
+        public static void Show(IntPtr ownerHandle)
         {
             try
             {
+                IntPtr tipWindow = FindWindow("IPTip_Main_Window", null);
+                if (tipWindow != IntPtr.Zero && IsWindowVisible(tipWindow)) return;
                 var invocation = (ITipInvocation)new UIHostNoLaunch();
                 invocation.Toggle(ownerHandle);
             }
@@ -243,6 +256,81 @@ namespace PhotoViewer.Interop
             {
                 // Clavier tactile indisponible (ex. Bureau classique sans TabTip) : ignore.
             }
+        }
+    }
+}
+
+namespace PhotoViewer.Services
+{
+    using PhotoViewer.Models;
+
+    // Compteur de generation thread-safe : invalide les chargements de miniatures encore en vol
+    // depuis un repertoire quitte (pas de dependance a une variable PowerShell, lue depuis un thread du pool).
+    public class GenerationGate
+    {
+        private int _current;
+        public int Current { get { return Volatile.Read(ref _current); } }
+        public int Next() { return Interlocked.Increment(ref _current); }
+    }
+
+    // Chargement asynchrone des miniatures entierement en C# : un ScriptBlock PowerShell ne peut PAS
+    // s'executer sur un thread brut du pool .NET (Task.Run) faute de Runspace attache a ce thread
+    // ("There is no Runspace available to run scripts in this thread") - d'ou l'echec silencieux
+    // total de la version precedente. Ce code est compile, donc utilisable depuis n'importe quel thread.
+    public static class ThumbnailLoader
+    {
+        private static SemaphoreSlim _semaphore = new SemaphoreSlim(4, 4);
+        private static readonly object _logLock = new object();
+
+        public static void Configure(int maxConcurrent)
+        {
+            _semaphore = new SemaphoreSlim(maxConcurrent, maxConcurrent);
+        }
+
+        public static void LoadAsync(PhotoItem photo, int decodePixelWidth, Dispatcher dispatcher, GenerationGate gate, int generation, string errorLogPath)
+        {
+            Task.Run(() =>
+            {
+                if (gate.Current != generation) return;
+                _semaphore.Wait();
+                try
+                {
+                    if (gate.Current != generation) return;
+                    BitmapImage bmp;
+                    using (var stream = File.OpenRead(photo.FullPath))
+                    {
+                        bmp = new BitmapImage();
+                        bmp.BeginInit();
+                        bmp.CacheOption = BitmapCacheOption.OnLoad;
+                        bmp.StreamSource = stream;
+                        bmp.DecodePixelWidth = decodePixelWidth;
+                        bmp.EndInit();
+                    }
+                    bmp.Freeze();
+                    dispatcher.Invoke((Action)(() =>
+                    {
+                        if (gate.Current == generation) photo.Thumbnail = bmp;
+                    }));
+                }
+                catch (Exception ex)
+                {
+                    try
+                    {
+                        lock (_logLock)
+                        {
+                            File.AppendAllText(errorLogPath, string.Format("[{0:yyyy-MM-dd HH:mm:ss}] Miniature KO '{1}': {2}{3}", DateTime.Now, photo.FullPath, ex.Message, Environment.NewLine));
+                        }
+                    }
+                    catch
+                    {
+                        // Log indisponible (droits, disque plein...) : on abandonne silencieusement ce log.
+                    }
+                }
+                finally
+                {
+                    _semaphore.Release();
+                }
+            });
         }
     }
 }
@@ -263,6 +351,19 @@ $rowsItemsControl = $window.FindName('RowsItemsControl')
 $uiDispatcher = $window.Dispatcher
 
 # ------------------------------------------------------------------
+# Clavier tactile Windows : InputScope numerique par defaut (l'utilisateur bascule vers
+# les lettres via le bouton propre au clavier tactile lui-meme si besoin - pas de bascule custom).
+# ------------------------------------------------------------------
+function Set-NumericInputScope {
+    param($TextBox)
+    $scope = New-Object System.Windows.Input.InputScope
+    $scopeName = New-Object System.Windows.Input.InputScopeName
+    $scopeName.NameValue = [System.Windows.Input.InputScopeNameValue]::Number
+    $scope.Names.Add($scopeName)
+    $TextBox.InputScope = $scope
+}
+
+# ------------------------------------------------------------------
 # Popup de renommage (repertoire "fraiches" uniquement)
 # ------------------------------------------------------------------
 function Show-RenamePopup {
@@ -279,59 +380,23 @@ function Show-RenamePopup {
     $trashButton = $popup.FindName('TrashButton')
     $validateButton = $popup.FindName('ValidateButton')
     $cancelButton = $popup.FindName('CancelButton')
-    $toggleKeyboardButton = $popup.FindName('ToggleKeyboardButton')
-    $numericKeypadPanel = $popup.FindName('NumericKeypadPanel')
 
     $extension = [System.IO.Path]::GetExtension($Photo.FileName)
     $nameTextBox.Text = [System.IO.Path]::GetFileNameWithoutExtension($Photo.FileName)
     $extensionLabel.Text = $extension
-    $nameTextBox.IsReadOnly = $true
-    $nameTextBox.Focusable = $false
-    $nameTextBox.SelectAll()
+    Set-NumericInputScope -TextBox $nameTextBox
 
     # HWND de la popup (force la creation du handle avant meme l'affichage) pour piloter le clavier tactile.
     $popupHandleHelper = New-Object System.Windows.Interop.WindowInteropHelper($popup)
     $popupHandleHelper.EnsureHandle() | Out-Null
     $popupHandle = $popupHandleHelper.Handle
 
-    # Pave numerique custom : chaque bouton porte son chiffre (ou BACK) dans Tag.
-    foreach ($child in $numericKeypadPanel.Children) {
-        if ($child -isnot [System.Windows.Controls.Button]) { continue }
-        if (-not $child.Tag) { continue }
-        $child.Add_Click({
-            param($s, $e)
-            $key = $s.Tag.ToString()
-            if ($key -eq 'BACK') {
-                if ($nameTextBox.Text.Length -gt 0) {
-                    $nameTextBox.Text = $nameTextBox.Text.Substring(0, $nameTextBox.Text.Length - 1)
-                }
-            } else {
-                $nameTextBox.Text += $key
-            }
-            $nameTextBox.CaretIndex = $nameTextBox.Text.Length
-        }.GetNewClosure())
-    }
-
-    # Bascule vers un clavier texte complet (systeme) quand des lettres sont necessaires.
-    # L'etat (numerique/texte) est lu directement sur l'UI (Visibility du pave) plutot que sur
-    # une variable a part : plus fiable qu'un booleen capture dans une closure de bouton.
-    $toggleKeyboardButton.Add_Click({
+    # Selection du nom + ouverture du clavier tactile une fois la popup reellement affichee.
+    $popup.Add_Loaded({
         param($s, $e)
-        $switchingToText = $numericKeypadPanel.Visibility -eq 'Visible'
-        if ($switchingToText) {
-            $numericKeypadPanel.Visibility = 'Collapsed'
-            $nameTextBox.IsReadOnly = $false
-            $nameTextBox.Focusable = $true
-            $nameTextBox.Focus()
-            $nameTextBox.SelectAll()
-            $toggleKeyboardButton.Content = 'Clavier numerique (123)'
-        } else {
-            $numericKeypadPanel.Visibility = 'Visible'
-            $nameTextBox.IsReadOnly = $true
-            $nameTextBox.Focusable = $false
-            $toggleKeyboardButton.Content = 'Clavier texte (ABC)'
-        }
-        [PhotoViewer.Interop.TouchKeyboard]::Toggle($popupHandle)
+        $nameTextBox.Focus()
+        $nameTextBox.SelectAll()
+        [PhotoViewer.Interop.TouchKeyboard]::Show($popupHandle)
     }.GetNewClosure())
 
     # Bouton corbeille : placeholder, la suppression reelle sera branchee a l'etape 4.
@@ -479,37 +544,18 @@ $scrollViewer.Add_SizeChanged({
 })
 
 # ------------------------------------------------------------------
-# Chargement asynchrone des miniatures (concurrence limitee via SemaphoreSlim)
+# Chargement asynchrone des miniatures : delegue entierement a du C# compile (voir
+# PhotoViewer.Services.ThumbnailLoader) - un ScriptBlock PowerShell ne peut pas s'executer
+# sur un thread brut du pool .NET (pas de Runspace attache), d'ou l'usage exclusif de C# ici.
 # ------------------------------------------------------------------
-$semaphore = New-Object System.Threading.SemaphoreSlim($MaxConcurrentThumbnailLoads, $MaxConcurrentThumbnailLoads)
-$script:loadGeneration = 0
+$script:generationGate = New-Object PhotoViewer.Services.GenerationGate
+[PhotoViewer.Services.ThumbnailLoader]::Configure($MaxConcurrentThumbnailLoads)
+$script:errorLogPath = Join-Path $PSScriptRoot 'PhotoViewer.errors.log'
 
 function Start-ThumbnailLoading {
     param([int]$Generation)
     foreach ($photo in $allPhotos) {
-        $loadThumbnail = {
-            if ($script:loadGeneration -ne $Generation) { return }
-            $semaphore.Wait()
-            try {
-                if ($script:loadGeneration -ne $Generation) { return }
-                $bmp = New-Object System.Windows.Media.Imaging.BitmapImage
-                $bmp.BeginInit()
-                $bmp.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
-                $bmp.UriSource = New-Object System.Uri($photo.FullPath)
-                $bmp.DecodePixelWidth = $ThumbnailDecodePixelWidth
-                $bmp.EndInit()
-                $bmp.Freeze()
-                $uiDispatcher.Invoke([Action]{
-                    if ($script:loadGeneration -eq $Generation) { $photo.Thumbnail = $bmp }
-                })
-            } catch {
-                # Fichier illisible/corrompu : on laisse la vignette vide plutot que de planter le thread.
-            } finally {
-                $semaphore.Release() | Out-Null
-            }
-        }.GetNewClosure()
-
-        [System.Threading.Tasks.Task]::Run([Action]$loadThumbnail) | Out-Null
+        [PhotoViewer.Services.ThumbnailLoader]::LoadAsync($photo, $ThumbnailDecodePixelWidth, $uiDispatcher, $script:generationGate, $Generation, $script:errorLogPath)
     }
 }
 
@@ -519,8 +565,7 @@ function Start-ThumbnailLoading {
 # ------------------------------------------------------------------
 function Load-CurrentDirectory {
     $config = $script:directoryConfigs[$script:currentDirectoryIndex]
-    $script:loadGeneration++
-    $generation = $script:loadGeneration
+    $generation = $script:generationGate.Next()
 
     $viewModel.DirectoryLabel = $config.Path
     $viewModel.IsReadOnly = $config.IsReadOnly

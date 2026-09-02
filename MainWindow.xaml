@@ -79,6 +79,7 @@
                                 <DataTemplate>
                                     <Button Width="150" Height="150" Margin="4" Padding="0"
                                             BorderThickness="0" Background="#FF2D2D30"
+                                            HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
                                             Command="{Binding DataContext.TapCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                             CommandParameter="{Binding}">
                                         <Grid>
@@ -87,7 +88,7 @@
                                                 <RowDefinition Height="Auto"/>
                                             </Grid.RowDefinitions>
                                             <Image Grid.Row="0" Source="{Binding Thumbnail}"
-                                                   Stretch="UniformToFill"/>
+                                                   Stretch="Uniform"/>
                                             <TextBlock Grid.Row="1" Text="{Binding FileName}"
                                                        Foreground="White" FontSize="10"
                                                        TextTrimming="CharacterEllipsis"
