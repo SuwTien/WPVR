@@ -537,6 +537,7 @@ $directoryLabel = $window.FindName('DirectoryLabel')
 $scrollViewer = $window.FindName('GridScrollViewer')
 $rowsItemsControl = $window.FindName('RowsItemsControl')
 $refreshButton = $window.FindName('RefreshButton')
+$cameraButton = $window.FindName('CameraButton')
 
 $fullScreenOverlay = $window.FindName('FullScreenOverlay')
 $fullScreenImageContainer = $window.FindName('FullScreenImageContainer')
@@ -870,6 +871,18 @@ Load-CurrentDirectory
 Start-FreshDirectoryWatcher
 
 $refreshButton.Add_Click({ param($s, $e) Load-CurrentDirectory })
+
+# Bouton "PHOTO" : lance l'appli Camera Windows si absente, ou la ramene au premier plan si deja
+# ouverte. Le protocole "microsoft.windows.camera:" gere ce comportement nativement (appli UWP
+# mono-instance : le relancer active simplement la fenetre existante au lieu d'en ouvrir une seconde).
+$cameraButton.Add_Click({
+    param($s, $e)
+    try {
+        Start-Process 'microsoft.windows.camera:'
+    } catch {
+        [System.Windows.MessageBox]::Show("Impossible de lancer l'appli Camera : $_", "Photo Viewer", 'OK', 'Error') | Out-Null
+    }
+})
 
 # ------------------------------------------------------------------
 # Mode plein ecran : appui long depuis la grille, boutons prev/suivant/fermer,

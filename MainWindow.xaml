@@ -22,14 +22,13 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <Grid Grid.Row="0" Margin="8">
+        <Grid Grid.Row="0" Margin="8,8,8,4">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
@@ -64,17 +63,19 @@
                 </TextBlock>
             </Border>
 
-            <Button x:Name="ChooseDirectoryButton" Grid.Column="2" Padding="10,6" Margin="0,0,8,0"
+            <Button x:Name="ChooseDirectoryButton" Grid.Column="2" Padding="10,6"
                     Content="Dossier..." Command="{Binding ChooseDirectoryCommand}"/>
-
-            <Button x:Name="RefreshButton" Grid.Column="3" Padding="10,6" Margin="0,0,8,0"
-                    Content="Rafraichir"/>
-
-            <Button x:Name="ToggleDirectoryButton" Grid.Column="4" Padding="10,6"
-                    Content="Basculer" Command="{Binding ToggleDirectoryCommand}"/>
         </Grid>
 
-        <ScrollViewer x:Name="GridScrollViewer" Grid.Row="1"
+        <!-- Barre d'outils : actions frequentes, sur sa propre ligne pour rester lisible en largeur reduite -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="8,0,8,8">
+            <Button x:Name="CameraButton" Padding="10,6" Margin="0,0,8,0" Content="PHOTO" FontWeight="Bold"/>
+            <Button x:Name="RefreshButton" Padding="10,6" Margin="0,0,8,0" Content="Rafraichir"/>
+            <Button x:Name="ToggleDirectoryButton" Padding="10,6"
+                    Content="Basculer" Command="{Binding ToggleDirectoryCommand}"/>
+        </StackPanel>
+
+        <ScrollViewer x:Name="GridScrollViewer" Grid.Row="2"
                       VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Disabled">
             <ItemsControl x:Name="RowsItemsControl">
@@ -125,7 +126,7 @@
         </ScrollViewer>
 
         <!-- Mode plein ecran (etape 5) : recouvre toute la fenetre, cache par defaut -->
-        <Grid x:Name="FullScreenOverlay" Grid.Row="0" Grid.RowSpan="2"
+        <Grid x:Name="FullScreenOverlay" Grid.Row="0" Grid.RowSpan="3"
               Background="#FF000000" Visibility="Collapsed" Focusable="True">
             <Border x:Name="FullScreenImageContainer" ClipToBounds="True">
                 <Image x:Name="FullScreenImage" Stretch="Uniform" RenderTransformOrigin="0.5,0.5">
