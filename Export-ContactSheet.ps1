@@ -9,6 +9,12 @@
     IMPORTANT : comme PhotoViewer.ps1, a lancer via "powershell.exe" (STA), pas "pwsh.exe" -
     l'automation COM Excel exige un thread STA, tout comme WPF.
 #>
+param(
+    # Fourni directement par le bouton du viewer (chemin du repertoire "fraiches" actif) pour
+    # eviter une popup redondante avec le SaveFileDialog. En lancement autonome (sans ce parametre),
+    # le script tente PhotoViewer.config.json, et ne propose le selecteur de dossier qu'en dernier recours.
+    [string]$SourceDirectory
+)
 
 Add-Type -AssemblyName PresentationCore, WindowsBase, System.Windows.Forms -ErrorAction SilentlyContinue
 
@@ -123,9 +129,31 @@ function Export-ContactSheet {
 # ------------------------------------------------------------------
 # Flux interactif : popup dossier source, puis popup fichier de sortie.
 # ------------------------------------------------------------------
-$sourceFolderDialog = New-Object System.Windows.Forms.FolderBrowserDialog
-$sourceFolderDialog.Description = 'Choisir le dossier de photos a exporter'
-if ($sourceFolderDialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return }
+# Determination du repertoire source, sans redemander si on le connait deja :
+# 1) parametre -SourceDirectory (fourni par le bouton du viewer) ;
+# 2) a defaut, PhotoViewer.config.json a cote de ce script (lancement autonome) ;
+# 3) en tout dernier recours seulement, un selecteur de dossier manuel.
+# ------------------------------------------------------------------
+if (-not $SourceDirectory -or -not (Test-Path -LiteralPath $SourceDirectory -PathType Container)) {
+    $configPath = Join-Path $PSScriptRoot 'PhotoViewer.config.json'
+    if (Test-Path -LiteralPath $configPath -PathType Leaf) {
+        try {
+            $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+            if ($config.FreshPhotoDirectory -and (Test-Path -LiteralPath $config.FreshPhotoDirectory -PathType Container)) {
+                $SourceDirectory = $config.FreshPhotoDirectory
+            }
+        } catch {
+            # Config illisible/absente : on retombe sur la selection manuelle ci-dessous.
+        }
+    }
+}
+
+if (-not $SourceDirectory -or -not (Test-Path -LiteralPath $SourceDirectory -PathType Container)) {
+    $sourceFolderDialog = New-Object System.Windows.Forms.FolderBrowserDialog
+    $sourceFolderDialog.Description = 'Choisir le dossier de photos a exporter'
+    if ($sourceFolderDialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return }
+    $SourceDirectory = $sourceFolderDialog.SelectedPath
+}
 
 $saveDialog = New-Object System.Windows.Forms.SaveFileDialog
 $saveDialog.Title = 'Enregistrer la planche contact'
@@ -136,7 +164,7 @@ $saveDialog.InitialDirectory = [Environment]::GetFolderPath('MyDocuments')
 if ($saveDialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return }
 
 try {
-    $count = Export-ContactSheet -SourceDirectory $sourceFolderDialog.SelectedPath -DestinationPath $saveDialog.FileName
+    $count = Export-ContactSheet -SourceDirectory $SourceDirectory -DestinationPath $saveDialog.FileName
     [System.Windows.Forms.MessageBox]::Show(
         "$count photo(s) exportee(s) dans :`n$($saveDialog.FileName)",
         'Export planche contact', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null

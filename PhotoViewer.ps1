@@ -886,13 +886,16 @@ $cameraButton.Add_Click({
 })
 
 # Export planche contact : delegue entierement au script separe Export-ContactSheet.ps1
-# (popups dossier source + fichier de sortie, generation via automation COM Excel).
+# (popup fichier de sortie uniquement, generation via automation COM Excel). On transmet le
+# repertoire "fraiches" actif directement -Source Directory : evite une popup de dossier
+# redondante et garantit qu'il exporte le bon dossier (pas d'ambiguite sur un choix manuel).
 # Invoque via l'operateur d'appel "&" : meme process/runspace (pas de nouveau powershell.exe),
 # donc meme thread STA (requis par Excel COM), assemblies deja chargees reutilisees telles quelles.
 $exportContactSheetButton.Add_Click({
     param($s, $e)
     try {
-        & (Join-Path $PSScriptRoot 'Export-ContactSheet.ps1')
+        $freshPath = $script:directoryConfigs[0].Path
+        & (Join-Path $PSScriptRoot 'Export-ContactSheet.ps1') -SourceDirectory $freshPath
     } catch {
         [System.Windows.MessageBox]::Show("Erreur pendant l'export : $_", "Photo Viewer", 'OK', 'Error') | Out-Null
     }
