@@ -100,7 +100,7 @@ function Export-ContactSheet {
 
         $row = 2
         foreach ($file in $files) {
-            $sheet.Cells.Item($row, 1) = $file.Name
+            $sheet.Cells.Item($row, 1) = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
 
             $cellLeft = $sheet.Cells.Item($row, 2).Left
             $cellTop = $sheet.Cells.Item($row, 2).Top
