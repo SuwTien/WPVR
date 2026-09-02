@@ -1,0 +1,5 @@
+# Config utilisateur locale (chemins de dossiers propres a chaque machine/utilisateur)
+PhotoViewer.config.json
+
+# Bloc-notes de logs temporaires colles depuis le terminal
+LogsTmp.txt
