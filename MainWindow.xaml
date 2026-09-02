@@ -71,8 +71,9 @@
         <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="8,0,8,8">
             <Button x:Name="CameraButton" Padding="10,6" Margin="0,0,8,0" Content="PHOTO" FontWeight="Bold"/>
             <Button x:Name="RefreshButton" Padding="10,6" Margin="0,0,8,0" Content="Rafraichir"/>
-            <Button x:Name="ToggleDirectoryButton" Padding="10,6"
+            <Button x:Name="ToggleDirectoryButton" Padding="10,6" Margin="0,0,8,0"
                     Content="Basculer" Command="{Binding ToggleDirectoryCommand}"/>
+            <Button x:Name="ExportContactSheetButton" Padding="10,6" Content="Export planche contact"/>
         </StackPanel>
 
         <ScrollViewer x:Name="GridScrollViewer" Grid.Row="2"

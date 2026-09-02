@@ -538,6 +538,7 @@ $scrollViewer = $window.FindName('GridScrollViewer')
 $rowsItemsControl = $window.FindName('RowsItemsControl')
 $refreshButton = $window.FindName('RefreshButton')
 $cameraButton = $window.FindName('CameraButton')
+$exportContactSheetButton = $window.FindName('ExportContactSheetButton')
 
 $fullScreenOverlay = $window.FindName('FullScreenOverlay')
 $fullScreenImageContainer = $window.FindName('FullScreenImageContainer')
@@ -881,6 +882,19 @@ $cameraButton.Add_Click({
         Start-Process 'microsoft.windows.camera:'
     } catch {
         [System.Windows.MessageBox]::Show("Impossible de lancer l'appli Camera : $_", "Photo Viewer", 'OK', 'Error') | Out-Null
+    }
+})
+
+# Export planche contact : delegue entierement au script separe Export-ContactSheet.ps1
+# (popups dossier source + fichier de sortie, generation via automation COM Excel).
+# Invoque via l'operateur d'appel "&" : meme process/runspace (pas de nouveau powershell.exe),
+# donc meme thread STA (requis par Excel COM), assemblies deja chargees reutilisees telles quelles.
+$exportContactSheetButton.Add_Click({
+    param($s, $e)
+    try {
+        & (Join-Path $PSScriptRoot 'Export-ContactSheet.ps1')
+    } catch {
+        [System.Windows.MessageBox]::Show("Erreur pendant l'export : $_", "Photo Viewer", 'OK', 'Error') | Out-Null
     }
 })
 
